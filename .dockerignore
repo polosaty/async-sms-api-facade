@@ -1,0 +1,17 @@
+.git
+.flake8
+.isort.cfg
+.pre-commit-config.yaml
+.gitignore
+.dockerignore
+.ash_history
+.idea
+.vscode
+.data
+.pytest_cache
+__pycache__
+README.md
+docker-compose.yml
+Dockerfile
+
+

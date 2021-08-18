@@ -1,0 +1,29 @@
+version: '2.4'
+
+services:
+  app:
+    image: &app async-sms-api-facade
+    mem_limit: 500M
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    command: python server.py --wet_run
+    environment:
+      LOG_LEVEL: DEBUG
+      LOGIN: 'smsc_login'
+      PASSWORD: 'smsc_password'
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./:/app
+    restart: always
+    depends_on:
+      - redis
+
+  redis:
+    image: redis
+    restart: always
+    volumes:
+      - ./.data/redis/:/data/
+    mem_limit: 1000M
+#    command: [sh, -c, "rm -f /data/dump.rdb && redis-server"]  # uncomment to disable persistence

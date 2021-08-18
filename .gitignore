@@ -1,0 +1,8 @@
+chat.log
+.ash_history
+.idea
+.vscode
+__pycache__
+.token
+.data
+/routes
