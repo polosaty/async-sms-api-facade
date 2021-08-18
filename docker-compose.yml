@@ -10,8 +10,8 @@ services:
     command: python server.py --wet_run
     environment:
       LOG_LEVEL: DEBUG
-      LOGIN: 'smsc_login'
-      PASSWORD: 'smsc_password'
+      LOGIN: ${LOGIN}
+      PASSWORD: ${PASSWORD}
     ports:
       - "5000:5000"
     volumes:

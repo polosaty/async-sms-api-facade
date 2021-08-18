@@ -6,6 +6,7 @@
 .dockerignore
 .ash_history
 .idea
+.env
 .vscode
 .data
 .pytest_cache

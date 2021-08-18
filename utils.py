@@ -71,8 +71,7 @@ class SendPayload(BaseModel):
     base_url = 'https://smsc.ru/sys/send.php'
     phones: Union[str, List[str]]
     mes: str
-    # charset = 'windows-1251'
-    # charset = 'utf-8'
+    charset = 'utf-8'  # 'windows-1251', 'koi8-r'
     fmt = 3  # json
     # cost = 1  # don't send only cost
 
@@ -82,7 +81,7 @@ class SendPayload(BaseModel):
         if isinstance(phones, list):
             d['phone'] = ','.join(phones)
 
-        # d['mes'] = self.mes.encode(self.charset)
+        d['mes'] = self.mes.encode(self.charset)
         return d
 
 
