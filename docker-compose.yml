@@ -20,6 +20,20 @@ services:
     depends_on:
       - redis
 
+  status_checker:
+    image: *app
+    mem_limit: 500M
+    command: python status_checker.py
+    environment:
+      LOG_LEVEL: DEBUG
+      LOGIN: ${LOGIN}
+      PASSWORD: ${PASSWORD}
+    volumes:
+      - ./:/app
+    restart: always
+    depends_on:
+      - redis
+
   redis:
     image: redis
     restart: always

@@ -1,4 +1,6 @@
 import logging
+import random
+import socket
 from typing import Coroutine, Dict, List, Union
 from unittest.mock import patch
 from urllib.parse import parse_qsl
@@ -50,7 +52,16 @@ def update_url(url, params):
     return new_url
 
 
-class StatusPayload(BaseModel):
+class GetUrlFromPayloadMixin:
+    def get_url(self, login, password):
+        return update_url(self.base_url, dict(
+            login=login,
+            psw=password,
+            **self.dict(exclude={'base_url'})
+        ))
+
+
+class StatusPayload(GetUrlFromPayloadMixin, BaseModel):
     base_url = 'https://smsc.ru/sys/status.php'
     phone: Union[str, List[str]]
     id: Union[int, List[int]]
@@ -62,12 +73,15 @@ class StatusPayload(BaseModel):
         phone = d.get('phone')
         if isinstance(id_, list):
             d['id'] = ','.join(map(str, id_))
+
+        d['id'] = f"{d['id']},"
         if isinstance(phone, list):
             d['phone'] = ','.join(phone)
+        d['phone'] += ','
         return d
 
 
-class SendPayload(BaseModel):
+class SendPayload(GetUrlFromPayloadMixin, BaseModel):
     base_url = 'https://smsc.ru/sys/send.php'
     phones: Union[str, List[str]]
     mes: str
@@ -127,13 +141,13 @@ async def request_smsc(
     except ValidationError as ex:
         raise SmscApiError(f'wrong payload {ex!r}')
 
-    url = update_url(_payload.base_url, dict(
-        login=login,
-        psw=password,
-        **_payload.dict(exclude={'base_url'})
-    ))
+    url = _payload.get_url(login=login, password=password)
 
-    response: Response = await asks.request('GET', url)
+    try:
+        response: Response = await asks.request('GET', url)
+    except socket.gaierror:
+        raise SmscApiError(f'smsc.ru api inaccessible')
+
     if response.status_code != 200:
         raise SmscApiError(f'status_code: {response.status_code}', response,)
 
@@ -155,11 +169,26 @@ def mock_asks_request_for_dry_run():
 
     async def request_side_effect(method, uri, **kwargs):
         logger.debug('call request_side_effect(method=%r, uri=%r, kwargs=%r)', method, uri, kwargs)
-        sms_status = {'status': 1, 'last_date': '28.12.2019 19:20:22', 'last_timestamp': 1577550022}
+        sms_status = {'status': random.choice([0, 1]), 'last_date': '28.12.2019 19:20:22', 'last_timestamp': 1577550022}
 
         sms_send = {"cnt": 1, "id": next(sms_id_gen)}
         if 'status.php' in uri:
-            return MockResponse(sms_status)
+            get_params = dict(parse_qsl(urlparse(uri).query))
+            ids = get_params['id'].split(',')
+            phones = get_params['phone'].split(',')
+
+            response = [
+                dict(
+                    sms_status,
+                    id=ids[indx],
+                    phone=phone,
+                    status=random.choice([1, 2, 4, -3, 3, 20, 22, 23, 24, 25, 0]),
+                )
+                for indx, phone in enumerate(phones)
+                if phone
+            ]
+
+            return MockResponse(response)
         if 'send.php' in uri:
             return MockResponse(sms_send)
 

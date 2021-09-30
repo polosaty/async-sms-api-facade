@@ -50,7 +50,7 @@ async def test_request_smsc(asks_request_patcher):
     assert request_mock.await_count == 1
     request_mock.assert_has_awaits(
         [call('GET', ('https://smsc.ru/sys/status.php'
-                      '?login=my_login&psw=my_password&phone=%2B79123456789&id=25&fmt=3'))])
+                      '?login=my_login&psw=my_password&phone=%2B79123456789%2C&id=25%2C&fmt=3'))])
 
     request_mock.reset_mock()
     request_mock.return_value = MockResponse(sms_send)
@@ -62,7 +62,7 @@ async def test_request_smsc(asks_request_patcher):
         'GET',
         ('https://smsc.ru/sys/send.php?login=my_login&psw=my_password'
          '&phones=%2B79123456789'
-         '&mes=test+%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0+%F0%9F%A6%9D%F0%9F%A6%9D&fmt=3'))
+         '&mes=test+%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0+%F0%9F%A6%9D%F0%9F%A6%9D&charset=utf-8&fmt=3'))
 
     with pytest.raises(SmscApiError) as ex:
         await request_smsc('send', 'my_login', 'my_password', {"phones": "+79123456789"})

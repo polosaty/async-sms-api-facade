@@ -1,6 +1,6 @@
-import time
 import json
-from typing import Optional
+import time
+from typing import List, Optional, Tuple
 
 
 def _clean_key(key):
@@ -71,7 +71,7 @@ class Database:
 
         return pending_sms_list
 
-    async def update_sms_status_in_bulk(self, sms_list):
+    async def update_sms_status_in_bulk(self, sms_list: List[Tuple[str, str, str]]):
         """Receives list of tuples (sms_id, phone, status)."""
         tr = self.redis.multi_exec()
 
