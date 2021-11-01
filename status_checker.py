@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import suppress
 import logging
 import os
 
@@ -8,18 +7,22 @@ import anyio
 import asyncclick as click
 import trio_asyncio
 
+from asyncio_to_trio import run_asyncio
 from db import Database
 from server import broadcast_error_to_redis_channels
 from server import broadcast_sms_update_to_redis_channels
-from utils import mock_asks_request_for_dry_run
-from utils import request_smsc
-from utils import run_asyncio
-from utils import SmscApiError
-from utils import StatusPayload
+from smsc_api import mock_asks_request_for_dry_run
+from smsc_api import request_smsc
+from smsc_api import SmscApiError
+from smsc_api import StatusPayload
 
 MAXIMUM_URL_LEN = 2000
 
 logger = logging.getLogger('status_checker')
+
+
+def clean_phone(phone: str):
+    return phone.replace('+7', '7').replace(' ', '')
 
 
 async def update_status(db, login, password):
@@ -27,13 +30,18 @@ async def update_status(db, login, password):
         try:
             pending_sms_list = await run_asyncio(db.get_pending_sms_list())
             logger.debug('pending_sms_list: %r', pending_sms_list)
-
+            comma_len = len('%2C')
             sms_ids = []
             phones_map = {}
-            url_len = len(StatusPayload(phone='', id='1').get_url(login, password)) - 1
+            not_empty_id = '1'
+            not_empty_phone = '1'
+            base_url_with_auth_len = (
+                len(StatusPayload(phone=not_empty_phone, id=not_empty_id).get_url(login, password))
+                - (len(not_empty_id) + len(not_empty_phone) + comma_len * 2))
+            url_len = base_url_with_auth_len
             for sms_id, phone in pending_sms_list:
-                phone_adapted = phone.replace('+7', '7').replace(' ', '')
-                additional_url_len = len(sms_id) + 1 + len(phone_adapted) + 1
+                phone_cleaned = clean_phone(phone)
+                additional_url_len = len(sms_id) + comma_len + len(phone_cleaned) + comma_len
 
                 if url_len + additional_url_len > MAXIMUM_URL_LEN:
                     response = await request_smsc(
@@ -41,18 +49,18 @@ async def update_status(db, login, password):
                     await handle_status_result(db, response, phones_map)
                     sms_ids = []
                     phones_map = {}
-                    url_len = len(StatusPayload(phone='', id='1').get_url(login, password)) - 1
+                    url_len = base_url_with_auth_len
 
                 sms_ids.append(sms_id)
-                phones_map[phone_adapted] = phone
+                phones_map[phone_cleaned] = phone
                 url_len += additional_url_len
 
             if sms_ids:
                 response = await request_smsc(
                     'status', login, password, {"phone": list(phones_map.keys()), "id": sms_ids})
                 await handle_status_result(db, response, phones_map)
-        except SmscApiError:
-            await broadcast_error_to_redis_channels(db, {"errorMessage": "Связь SMSC потеряна"})
+        except SmscApiError as ex:
+            await broadcast_error_to_redis_channels(db, {"errorMessage": f"Связь SMSC потеряна: {ex.response.json()}"})
         await anyio.sleep(5)
 
 

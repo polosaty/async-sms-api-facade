@@ -6,8 +6,8 @@ import anyio
 import trio
 import trio_asyncio
 
+from asyncio_to_trio import run_asyncio
 from db import Database
-from utils import run_asyncio
 
 
 def create_argparser():

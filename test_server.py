@@ -11,10 +11,10 @@ import pytest
 import trio
 import trio_asyncio
 
+from asyncio_to_trio import run_asyncio
 from server import CHANNEL_BROADCAST_KEY
+from smsc_api import MockResponse
 from status_checker import handle_status_result
-from utils import MockResponse
-from utils import run_asyncio
 
 
 async def test_index(testapp):
@@ -86,9 +86,9 @@ async def test_send(testapp):
     # Он вызывает fetch_smsc
     assert request_mock.await_count == 1
     request_mock.assert_has_awaits(
-        [call('GET', 'https://smsc.ru/sys/send.php?login=my_login&psw=my_password'
-                     '&phones=%5B%27123%27%2C+%27456%27%5D'
-                     '&mes=some+text&charset=utf-8&fmt=3&phone=123%2C456')])
+        [call('GET', 'https://smsc.ru/sys/send.php',
+              params={'login': 'my_login', 'psw': 'my_password', 'phones': '123,456',
+                      'mes': b'some text', 'charset': 'utf-8', 'fmt': 3})])
 
     # Вызывает app.redis.publish
     assert testapp.db.redis.publish.await_count == 1

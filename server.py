@@ -16,12 +16,12 @@ from quart_trio import QuartTrio
 import trio
 import trio_asyncio
 
+from asyncio_to_trio import run_asyncio
 from db import Database
-from utils import mock_asks_request_for_dry_run
-from utils import request_smsc
-from utils import run_asyncio
-from utils import SmscApiError
-from utils import SmsSendResponse
+from smsc_api import mock_asks_request_for_dry_run
+from smsc_api import request_smsc
+from smsc_api import SmscApiError
+from smsc_api import SmsSendResponse
 
 logger = logging.getLogger('server')
 
@@ -58,7 +58,10 @@ async def send():
         await run_asyncio(app.db.add_sms_mailing(sms_id=sms_id, phones=phones, text=text))
         await broadcast_sms_update_to_redis_channels(app.db, sms_id)
     except SmscApiError as ex:
-        return {'success': False, "errorMessage": ex.response.json() if ex.response else ex.message}
+        if ex.response:
+            return {'success': False, "errorMessage": f'smsc api error: {ex.response.json().get("error")}'}
+        else:
+            return {'success': False, "errorMessage": f'smsc api error: {ex.message}'}
 
     return {'success': True, 'response': response}
 

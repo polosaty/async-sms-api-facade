@@ -1,7 +1,9 @@
+import collections
+import itertools
 import logging
 import random
 import socket
-from typing import Coroutine, Dict, List, Union
+from typing import Dict, Iterable, List, Union
 from unittest.mock import patch
 from urllib.parse import parse_qsl
 from urllib.parse import urlencode
@@ -11,14 +13,11 @@ from urllib.parse import urlunparse
 import asks
 from asks.response_objects import Response
 from pydantic import BaseModel
+from pydantic import root_validator
 from pydantic import ValidationError
-import trio_asyncio
+from pydantic import validator
 
-logger = logging.getLogger('utils')
-
-
-async def run_asyncio(coroutine: Coroutine):
-    return await trio_asyncio.run_aio_coroutine(coroutine)
+logger = logging.getLogger('smsc_api')
 
 
 class MockResponse(Response):
@@ -43,60 +42,63 @@ class SmscApiError(Exception):
         return f'<SmscApiError({self.message!r}, {self.response!r})>'
 
 
-def update_url(url, params):
-    parsed_url = urlparse(url)
-    url_dict = dict(parse_qsl(parsed_url.query))
-    url_dict.update(params)
-    url_new_query = urlencode(url_dict)
-    new_url = urlunparse(parsed_url._replace(query=url_new_query))
-    return new_url
+class SmscPayloadModel(BaseModel):
+    base_url = 'https://smsc.ru/sys/status.php'
 
-
-class GetUrlFromPayloadMixin:
     def get_url(self, login, password):
-        return update_url(self.base_url, dict(
+        return replace_url_params(self.base_url, dict(
             login=login,
             psw=password,
             **self.dict(exclude={'base_url'})
         ))
 
 
-class StatusPayload(GetUrlFromPayloadMixin, BaseModel):
+class StatusPayload(SmscPayloadModel):
     base_url = 'https://smsc.ru/sys/status.php'
-    phone: Union[str, List[str]]
-    id: Union[int, List[int]]
+    phone: Union[str, Iterable[str]]
+    id: Union[int, Iterable[int]]
     fmt = 3  # json
 
-    def dict(self, *args, **kwargs):
-        d = super().dict(*args, **kwargs)
-        id_ = d.get('id')
-        phone = d.get('phone')
-        if isinstance(id_, list):
-            d['id'] = ','.join(map(str, id_))
+    @validator('id')
+    def validate_id(cls, v):
+        if isinstance(v, int):
+            return f"{v},"
+        elif isinstance(v, collections.Iterable):
+            return f"{','.join(map(str, v))},"
+        else:
+            raise ValueError('must be int or iterable of ints')
 
-        d['id'] = f"{d['id']},"
-        if isinstance(phone, list):
-            d['phone'] = ','.join(phone)
-        d['phone'] += ','
-        return d
+    @validator('phone')
+    def validate_phone(cls, v):
+        if isinstance(v, str):
+            return f"{v},"
+        elif isinstance(v, collections.Iterable):
+            return f"{','.join(v)},"
+        else:
+            raise ValueError('must be str or iterable of strs')
 
 
-class SendPayload(GetUrlFromPayloadMixin, BaseModel):
+class SendPayload(SmscPayloadModel):
     base_url = 'https://smsc.ru/sys/send.php'
-    phones: Union[str, List[str]]
-    mes: str
+    phones: Union[str, Iterable[str]]
     charset = 'utf-8'  # 'windows-1251', 'koi8-r'
+    mes: str
     fmt = 3  # json
-    # cost = 1  # don't send only cost
 
-    def dict(self, *args, **kwargs):
-        d = super().dict(*args, **kwargs)
-        phones = d.get('phones')
-        if isinstance(phones, list):
-            d['phone'] = ','.join(phones)
+    @validator('phones')
+    def validate_phones(cls, v):
+        if isinstance(v, str):
+            return v
+        elif isinstance(v, collections.Iterable):
+            return ','.join(v)
+        else:
+            raise ValueError('must be str or iterable of strs')
 
-        d['mes'] = self.mes.encode(self.charset)
-        return d
+    @root_validator
+    def validate_mess(cls, values):
+        if 'mes' not in values:
+            raise ValueError('mes is required')
+        return dict(values, mes=values['mes'].encode(values['charset']))
 
 
 class SmsSendResponse(BaseModel):
@@ -108,7 +110,7 @@ async def request_smsc(
         method: str,
         login: str,
         password: str,
-        payload: Dict[str, Union[str, List[str]]]
+        payload: Dict[str, Union[str, Iterable[str]]]
 ) -> Union[Dict, List]:
     """Send request to SMSC.ru service.
 
@@ -129,24 +131,29 @@ async def request_smsc(
         {'status': 1, 'last_date': '28.12.2019 19:20:22', 'last_timestamp': 1577550022}
     """
 
-    if method == 'status':
-        Payload = StatusPayload
-    elif method == 'send':
-        Payload = SendPayload
-    else:
+    SMSC_METHOD_TO_PAYLOAD = {
+        'status': StatusPayload,
+        'send': SendPayload,
+    }
+
+    if method not in SMSC_METHOD_TO_PAYLOAD:
         raise SmscApiError(f'unknown method {method}')
+
+    Payload = SMSC_METHOD_TO_PAYLOAD.get(method)
 
     try:
         _payload = Payload.validate(payload)
     except ValidationError as ex:
         raise SmscApiError(f'wrong payload {ex!r}')
 
-    url = _payload.get_url(login=login, password=password)
-
     try:
-        response: Response = await asks.request('GET', url)
+        response: Response = await asks.request('GET', _payload.base_url, params=dict(
+            login=login,
+            psw=password,
+            **_payload.dict(exclude={'base_url'})
+        ))
     except socket.gaierror:
-        raise SmscApiError(f'smsc.ru api inaccessible')
+        raise SmscApiError('smsc.ru api inaccessible')
 
     if response.status_code != 200:
         raise SmscApiError(f'status_code: {response.status_code}', response,)
@@ -159,19 +166,12 @@ async def request_smsc(
 
 
 def mock_asks_request_for_dry_run():
-    def get_sms_id():
-        _id = 24
-        while True:
-            _id += 1
-            yield _id
-
-    sms_id_gen = get_sms_id()
+    sms_id_gen = itertools.count(start=1, step=1)
 
     async def request_side_effect(method, uri, **kwargs):
         logger.debug('call request_side_effect(method=%r, uri=%r, kwargs=%r)', method, uri, kwargs)
         sms_status = {'status': random.choice([0, 1]), 'last_date': '28.12.2019 19:20:22', 'last_timestamp': 1577550022}
 
-        sms_send = {"cnt": 1, "id": next(sms_id_gen)}
         if 'status.php' in uri:
             get_params = dict(parse_qsl(urlparse(uri).query))
             ids = get_params['id'].split(',')
@@ -190,7 +190,15 @@ def mock_asks_request_for_dry_run():
 
             return MockResponse(response)
         if 'send.php' in uri:
+            sms_send = {"cnt": 1, "id": next(sms_id_gen)}
             return MockResponse(sms_send)
 
     asks_request_patcher = patch('asks.request', side_effect=request_side_effect)
     asks_request_patcher.start()
+
+
+def replace_url_params(url, params):
+    parsed_url = urlparse(url)
+    new_url_params = urlencode(dict(parse_qsl(parsed_url.query), **params))
+    new_url = urlunparse(parsed_url._replace(query=new_url_params))
+    return new_url

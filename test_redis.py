@@ -4,26 +4,10 @@ import aioredis
 import anyio
 import trio_asyncio
 
-# from asyncio import events as _aio_event
-# try:
-#     _orig_run_get = _aio_event.get_running_loop
-# except AttributeError:
-#     pass
-# else:
-#     def _new_run_get():
-#         return _aio_event._get_running_loop()
-#     _aio_event.get_running_loop = _new_run_get
-
 
 async def test_redis():
 
     async with trio_asyncio.open_loop() as loop:
-        # import aioredis.util as aioredis_util
-        # aioredis.stream.get_event_loop = lambda: loop
-        # _aio_event.get_running_loop = lambda: loop
-        # aioredis_util.get_event_loop = lambda: loop
-        # asyncio.set_event_loop(loop)
-
         asyncio._set_running_loop(loop)
 
         async def _test_redis():

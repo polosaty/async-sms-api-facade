@@ -4,32 +4,9 @@ from unittest.mock import patch
 
 import pytest
 
-from utils import MockResponse
-from utils import request_smsc
-from utils import SmscApiError
-
-# async def test_real_request_smsc():
-#     # api = SmscApi(login, password)
-#     # response = await api.send(['89995190557'], 'test проверка 🦝🦝')
-#     """
-#     {
-#     "id": 182,
-#     "cnt": 1
-#     }
-#     """
-#     # response = await api.status([182, 181], ['89995190557'])
-#     """
-#     [{'status': 1, 'last_date': '15.08.2021 20:27:22', 'last_timestamp': 1629048442, 'id': 182, 'phone': '89995190557'},
-#      {'status': 1, 'last_date': '15.08.2021 20:02:03', 'last_timestamp': 1629046923, 'id': 181, 'phone': '89995190557'}]
-#     """
-#
-#     """
-#     [{"status": -3, "id": 138, "phone": "89995190557"}]
-#     """
-#
-#     """{'error': 'duplicate request, wait a minute', 'error_code': 9}"""
-#
-#     # response = await request_smsc('status', login, password, {"phone": "+79995190557", "id": "181"})
+from smsc_api import MockResponse
+from smsc_api import request_smsc
+from smsc_api import SmscApiError
 
 
 @patch('asks.request')
@@ -49,8 +26,9 @@ async def test_request_smsc(asks_request_patcher):
     assert result == sms_status
     assert request_mock.await_count == 1
     request_mock.assert_has_awaits(
-        [call('GET', ('https://smsc.ru/sys/status.php'
-                      '?login=my_login&psw=my_password&phone=%2B79123456789%2C&id=25%2C&fmt=3'))])
+        [call('GET', 'https://smsc.ru/sys/status.php',
+              params={'login': 'my_login', 'psw': 'my_password',
+                      'phone': '+79123456789,', 'id': '25,', 'fmt': 3})])
 
     request_mock.reset_mock()
     request_mock.return_value = MockResponse(sms_send)
@@ -60,16 +38,18 @@ async def test_request_smsc(asks_request_patcher):
     assert request_mock.await_count == 1
     request_mock.assert_awaited_once_with(
         'GET',
-        ('https://smsc.ru/sys/send.php?login=my_login&psw=my_password'
-         '&phones=%2B79123456789'
-         '&mes=test+%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B0+%F0%9F%A6%9D%F0%9F%A6%9D&charset=utf-8&fmt=3'))
+        'https://smsc.ru/sys/send.php',
+        params={'login': 'my_login', 'psw': 'my_password', 'phones': '+79123456789',
+                'mes': b'test \xd0\xbf\xd1\x80\xd0\xbe\xd0\xb2\xd0\xb5\xd1\x80\xd0\xba\xd0\xb0 '
+                       b'\xf0\x9f\xa6\x9d\xf0\x9f\xa6\x9d',
+                'charset': 'utf-8', 'fmt': 3})
 
     with pytest.raises(SmscApiError) as ex:
         await request_smsc('send', 'my_login', 'my_password', {"phones": "+79123456789"})
 
-    assert ex.value.message == ("wrong payload ValidationError(model='SendPayload', "
-                                "errors=[{'loc': ('mes',), 'msg': 'field required', "
-                                "'type': 'value_error.missing'}])")
+    assert ex.value.message == ("wrong payload ValidationError(model='SendPayload', errors=[{'loc': ('mes',), "
+                                "'msg': 'field required', 'type': 'value_error.missing'}, {'loc': "
+                                "('__root__',), 'msg': 'mes is required', 'type': 'value_error'}])")
 
     sms_error = {'error': 'duplicate request, wait a minute', 'error_code': 9}
     with pytest.raises(SmscApiError) as ex:
